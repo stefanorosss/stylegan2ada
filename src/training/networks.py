@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
@@ -8,12 +8,8 @@
 
 import numpy as np
 import torch
-from torch_utils import misc
-from torch_utils import persistence
-from torch_utils.ops import conv2d_resample
-from torch_utils.ops import upfirdn2d
-from torch_utils.ops import bias_act
-from torch_utils.ops import fma
+from src.torch_utils import misc, persistence
+from src.torch_utils.ops import conv2d_resample, upfirdn2d, bias_act, fma
 
 #----------------------------------------------------------------------------
 
@@ -457,7 +453,6 @@ class SynthesisNetwork(torch.nn.Module):
         self.img_resolution_log2 = int(np.log2(img_resolution))
         self.init_res = init_res # !!! custom
         self.img_channels = img_channels
-        self.fmap_base = channel_base
         self.block_resolutions = [2 ** i for i in range(2, self.img_resolution_log2 + 1)]
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_resolutions}
         fp16_resolution = max(2 ** (self.img_resolution_log2 + 1 - num_fp16_res), 8)

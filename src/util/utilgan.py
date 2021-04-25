@@ -168,9 +168,11 @@ def multimask(x, size, latmask=None, countHW=[1,1], delta=0.):
         if len(latmask.shape) < 4:
             latmask = latmask.unsqueeze(1) # [b,1,h,w]
         lms = latmask.shape
+        #print('mask shape',lms)
         if list(lms[2:]) != list(size) and np.prod(lms) > 1:
             latmask = F.interpolate(latmask, size) # , mode='nearest'
         latmask = latmask.type(x.dtype)
+        #print(np.shape(x))
         x = torch.sum(x[:lms[0]] * latmask, 0, keepdim=True)
     else:
         return x
@@ -231,8 +233,8 @@ def tile_pad(xt, padding, symm=True):
 
     x_idx = np.arange(-left, w+right)
     y_idx = np.arange(-top, h+bottom)
-    x_pad = tile(x_idx, -0.5, w-0.5, symm)
-    y_pad = tile(y_idx, -0.5, h-0.5, symm)
+    x_pad = tile(x_idx, -0.5, w-0.5)
+    y_pad = tile(y_idx, -0.5, h-0.5)
     xx, yy = np.meshgrid(x_pad, y_pad)
     return xt[..., yy, xx]
 
@@ -247,11 +249,10 @@ def pad_up_to(x, size, type='centr'):
             p0 = (s-sh[i]) // 2
             p1 = s-sh[i] - p0
             padding = padding + [p0,p1]
-    y = tile_pad(x, padding, symm = 'symm' in type.lower())
-    # if 'symm' in type.lower():
-        # y = tile_pad(x, padding, symm=True)
-    # else:
-        # y = F.pad(x, padding, 'circular')
+    if 'symm' in type.lower():
+        y = tile_pad(x, padding, symm=True)
+    else:
+        y = F.pad(x, padding, 'circular')
     return y
 
 # scale_type may include pad, side, symm
@@ -266,13 +267,13 @@ def fix_size(x, size, scale_type='centr'):
     if scale_type.lower() == 'fit':
         return F.interpolate(x, size, mode='nearest') # , align_corners=True
     elif 'pad' in scale_type.lower():
-        pass
+        old_size = list(x.shape[2:])
     else: # proportional scale to smaller side, then pad to bigger side
         sh0 = x.shape[2:]
-        upsc = np.min(size) / np.min(sh0)
-        new_size = [int(sh0[i]*upsc) for i in [0,1]]
-        x = F.interpolate(x, new_size, mode='nearest') # , align_corners=True
-
+        upsc = np.min([float(size[i]) / float(sh0[i]) for i in [0,1]])
+        old_size = [int(sh0[i]*upsc) for i in [0,1]]
+        x = F.interpolate(x, old_size, mode='nearest') # , align_corners=True
+    
     x = pad_up_to(x, size, scale_type)
     return x
 
@@ -368,4 +369,8 @@ def img_read(path):
     if img.shape[2] == 4:
         img = img[:,:,:3]
     return img
+
+
+
+
     

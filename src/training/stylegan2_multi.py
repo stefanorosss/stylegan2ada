@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
@@ -8,16 +8,16 @@
 
 import numpy as np
 import torch
-from torch_utils import misc
-from torch_utils import persistence
-from torch_utils.ops import conv2d_resample
-from torch_utils.ops import upfirdn2d
-from torch_utils.ops import bias_act
-from torch_utils.ops import fma
+from src.torch_utils import misc, persistence
+from src.torch_utils.ops import conv2d_resample, upfirdn2d, bias_act, fma
+
 
 from .networks import FullyConnectedLayer, Conv2dLayer, ToRGBLayer, MappingNetwork
 
-from util.utilgan import hw_scales, fix_size, multimask
+import src.util.utilgan
+from src.util.utilgan import hw_scales, fix_size, multimask
+from importlib import reload
+reload(src.util.utilgan)
 
 @misc.profiled_function
 def modulated_conv2d(
@@ -45,6 +45,7 @@ def modulated_conv2d(
     misc.assert_shape(x, [batch_size, in_channels, None, None]) # [NIHW]
     misc.assert_shape(styles, [batch_size, in_channels]) # [NI]
 
+    
     # Pre-normalize inputs to avoid FP16 overflow.
     if x.dtype == torch.float16 and demodulate:
         weight = weight * (1 / np.sqrt(in_channels * kh * kw) / weight.norm(float('inf'), dim=[1,2,3], keepdim=True)) # max_Ikk
@@ -90,10 +91,23 @@ def modulated_conv2d(
         x = fix_size(x, size, scale_type)
         x = multimask(x, size, latmask, countHW, splitfine)
     if noise is not None:
+        # print(x.shape, noise.shape)
+        noise = noise.to(x.device)
         x = x.add_(noise)
     return x
 
 #----------------------------------------------------------------------------
+class NoiseInjection(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.zeros(1))
+
+    def forward(self, image, noise=None):
+        if noise is None:
+            batch, _, height, width = image.shape
+            noise = image.new_empty(batch, 1, height, width).normal_()
+        print(self.weight)
+        return image + self.weight * noise.to(image.device)
 
 @persistence.persistent_class
 class SynthesisLayer(torch.nn.Module):
@@ -139,17 +153,17 @@ class SynthesisLayer(torch.nn.Module):
             self.register_buffer('noise_const', torch.randn([resolution * init_res[0]//4, resolution * init_res[1]//4]))
             # self.register_buffer('noise_const', torch.randn([resolution, resolution]))
             self.noise_strength = torch.nn.Parameter(torch.zeros([]))
+            # self.noise = NoiseInjection()
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
 
 # !!! custom 
-    def forward(self, x, latmask, w, noise_mode='random', fused_modconv=True, gain=1):
+    def forward(self, x, latmask, w, noise = None, noise_mode='audioreactive',  fused_modconv=True, gain=1):
     # def forward(self, x, w, noise_mode='random', fused_modconv=True, gain=1):
-        assert noise_mode in ['random', 'const', 'none']
+        assert noise_mode in ['random', 'const', 'none', 'audioreactive']
         in_resolution = self.resolution // self.up
         # misc.assert_shape(x, [None, self.weight.shape[1], in_resolution, in_resolution])
         styles = self.affine(w)
 
-        noise = None
         if self.use_noise and noise_mode == 'random':
 # !!! custom
             sz = self.size if self.up==2 and self.size is not None else x.shape[2:]
@@ -174,7 +188,7 @@ class SynthesisLayer(torch.nn.Module):
         return x
 
 #----------------------------------------------------------------------------
-
+ 
 @persistence.persistent_class
 class SynthesisBlock(torch.nn.Module):
     def __init__(self,
@@ -238,7 +252,7 @@ class SynthesisBlock(torch.nn.Module):
                 resample_filter=resample_filter, channels_last=self.channels_last)
 
 # !!! custom
-    def forward(self, x, img, ws, latmask, dconst, force_fp32=False, fused_modconv=None, **layer_kwargs):
+    def forward(self, x, img, ws, latmask, dconst, noise = [None,None], force_fp32=True, fused_modconv=None, **layer_kwargs):
     # def forward(self, x, img, ws, force_fp32=False, fused_modconv=None, **layer_kwargs):
         misc.assert_shape(ws, [None, self.num_conv + self.num_torgb, self.w_dim])
         w_iter = iter(ws.unbind(dim=1))
@@ -265,20 +279,20 @@ class SynthesisBlock(torch.nn.Module):
         # Main layers.
         if self.in_channels == 0:
 # !!! custom latmask
-            x = self.conv1(x, None, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv1(x, None, next(w_iter), noise = noise[1] , fused_modconv=fused_modconv, **layer_kwargs)
             # x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
         elif self.architecture == 'resnet':
             y = self.skip(x, gain=np.sqrt(0.5))
 # !!! custom latmask
-            x = self.conv0(x, latmask, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            x = self.conv1(x, None, next(w_iter), fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
+            x = self.conv0(x, latmask, next(w_iter), noise = noise[0], fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv1(x, None, next(w_iter), noise = noise[1], fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
             # x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
             # x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
             x = y.add_(x)
         else:
 # !!! custom latmask
-            x = self.conv0(x, latmask, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            x = self.conv1(x, None, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv0(x, latmask, next(w_iter), noise = noise[0], fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv1(x, None, next(w_iter), noise = noise[1], fused_modconv=fused_modconv, **layer_kwargs)
             # x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
             # x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
 
@@ -293,6 +307,7 @@ class SynthesisBlock(torch.nn.Module):
             y = self.torgb(x, next(w_iter), fused_modconv=fused_modconv)
             y = y.to(dtype=torch.float32, memory_format=torch.contiguous_format)
             img = img.add_(y) if img is not None else y
+        
 
         assert x.dtype == dtype
         assert img is None or img.dtype == torch.float32
@@ -322,8 +337,9 @@ class SynthesisNetwork(torch.nn.Module):
         self.img_resolution = img_resolution
         self.res_log2 = int(np.log2(img_resolution))
         self.img_channels = img_channels
-        self.fmap_base = channel_base
         self.block_resolutions = [2 ** i for i in range(2, self.res_log2 + 1)]
+        self.noises = torch.nn.Module()
+
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_resolutions}
         fp16_resolution = max(2 ** (self.res_log2 + 1 - num_fp16_res), 8)
 
@@ -349,8 +365,10 @@ class SynthesisNetwork(torch.nn.Module):
             if is_last:
                 self.num_ws += block.num_torgb
             setattr(self, f'b{res}', block)
+        
+        
 
-    def forward(self, ws, latmask, dconst, **block_kwargs):
+    def forward(self, ws, latmask, dconst, noises, **block_kwargs):
         block_ws = []
         with torch.autograd.profiler.record_function('split_ws'):
             misc.assert_shape(ws, [None, self.num_ws, self.w_dim])
@@ -361,11 +379,20 @@ class SynthesisNetwork(torch.nn.Module):
                 block_ws.append(ws.narrow(1, w_idx, block.num_conv + block.num_torgb))
                 w_idx += block.num_conv
 
+                # pass audioreactive noise
+
+
+                
+
         x = img = None
-        for res, cur_ws in zip(self.block_resolutions, block_ws):
+        for _, res, cur_ws in zip(range(len(self.block_resolutions)),self.block_resolutions, block_ws):
             block = getattr(self, f'b{res}')
 # !!! custom
-            x, img = block(x, img, cur_ws, latmask, dconst, **block_kwargs)
+            if res == 4:
+                noise = (None,noises[0])
+            else:
+                noise = noises[_*2-1:_*2+1]
+            x, img = block(x, img, cur_ws, latmask, dconst, noise, **block_kwargs)
             # x, img = block(x, img, cur_ws, **block_kwargs)
         return img
 
@@ -391,17 +418,35 @@ class Generator(torch.nn.Module):
         self.img_resolution = img_resolution
         self.init_res = init_res # !!! custom
         self.img_channels = img_channels
+        
 # !!! custom
         self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, init_res=init_res, img_channels=img_channels, **synthesis_kwargs) # !!! custom
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, c_dim=c_dim, w_dim=w_dim, num_ws=self.num_ws, **mapping_kwargs)
 # !!! custom
         self.output_shape = [1, img_channels, img_resolution * init_res[0] // 4, img_resolution * init_res[1] // 4]
+        #print('kwarg size', synthesis_kwargs.size)
+# from audioreactive repo
+        # for layer_idx in range((self.synthesis.res_log2-1)*2-1):
+        for  res in self.synthesis.block_resolutions:
+            #print(layer_idx)
+            # res = (layer_idx + 5) // 2
+            shape = [1, 1,  res,  res]
+            self.synthesis.noises.register_buffer(f"noise_{res}", torch.randn(*shape))
+        
+        if synthesis_kwargs.size != (img_resolution,img_resolution):
+            for  res in self.synthesis.block_resolutions:
+                shape = [1, 1,
+                  res*(synthesis_kwargs.size[0] // img_resolution  ),  
+                  res*(synthesis_kwargs.size[1] // img_resolution  )]
+                
+                setattr(self.synthesis.noises, f"noise_{res}", torch.randn(*shape))
 
+            
 # !!! custom
-    def forward(self, z, c, latmask, dconst, truncation_psi=1, truncation_cutoff=None, **synthesis_kwargs):
+    def forward(self, z, c, latmask, dconst, noise=None, truncation_psi=1, truncation_cutoff=None, **synthesis_kwargs):
     # def forward(self, z, c, truncation_psi=1, truncation_cutoff=None, **synthesis_kwargs):
         ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
-        img = self.synthesis(ws, latmask, dconst, **synthesis_kwargs) # !!! custom
+        img = self.synthesis(ws, latmask, dconst, noise, **synthesis_kwargs) # !!! custom
         return img
 
