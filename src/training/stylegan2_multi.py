@@ -174,7 +174,15 @@ class SynthesisLayer(torch.nn.Module):
 # !!! custom noise size
             noise_size = self.size if self.up==2 and self.size is not None and self.resolution > 4 else x.shape[2:]
             noise = fix_size(noise.unsqueeze(0).unsqueeze(0), noise_size, scale_type=self.scale_type)[0][0]
-
+        
+        if self.use_noise and noise_mode == 'audioreactive':
+            if noise == None:
+                noise = self.noise_const * self.noise_strength
+                noise_size = self.size if self.up==2 and self.size is not None and self.resolution > 4 else x.shape[2:]
+                noise = fix_size(noise.unsqueeze(0).unsqueeze(0), noise_size, scale_type=self.scale_type)[0][0]
+        
+            else:
+                noise = noise.cuda() * self.noise_strength
         # print(x.shape, noise.shape, self.size, self.up)
 
         flip_weight = (self.up == 1) # slightly faster
