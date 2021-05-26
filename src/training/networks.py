@@ -80,6 +80,20 @@ def modulated_conv2d(
     return x
 
 #----------------------------------------------------------------------------
+@persistence.persistent_class
+class ManipulationLayer(torch.nn.Module):
+    def __init__(self, layer):
+        super().__init__()
+        self.layer = layer
+
+    def forward(self, input, tranforms_dict_list):
+        out = input
+        for transform_dict in tranforms_dict_list:
+            if transform_dict["layer"] == self.layer:
+                out = transform_dict["transform"].to(out.device)(out)
+        return out
+
+#----------------------------------------------------------------------------
 
 @persistence.persistent_class
 class FullyConnectedLayer(torch.nn.Module):
