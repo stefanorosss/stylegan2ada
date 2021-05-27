@@ -105,7 +105,7 @@ class NoiseInjection(torch.nn.Module):
         if noise is None:
             batch, _, height, width = image.shape
             noise = image.new_empty(batch, 1, height, width).normal_()
-        print(self.weight)
+        # print(self.weight)
         return image + self.weight * noise.to(image.device)
 
 @persistence.persistent_class
@@ -316,9 +316,18 @@ class SynthesisBlock(torch.nn.Module):
         if self.is_last or self.architecture == 'skip':
             y = self.torgb(x, next(w_iter), fused_modconv=fused_modconv)
             y = y.to(dtype=torch.float32, memory_format=torch.contiguous_format)
+            if img is not None:
+                for transform_dict in transform_dict_list:
+                    if self.in_channels == 0:
+                        if (self.conv1.layer_idx == transform_dict['layer']) and (transform_dict['RGB']):
+                            img = transform_dict["transform"].to(img.device)(img)
+                    else:
+                        if (self.conv0.layer_idx == transform_dict['layer'] or self.conv1.layer_idx == transform_dict['layer']) and transform_dict['RGB']:
+                            img = transform_dict["transform"].to(img.device)(img)
+            # print(img.shape, y.shape) if img is not None else print(y.shape)
             img = img.add_(y) if img is not None else y
-        
 
+            
         assert x.dtype == dtype
         assert img is None or img.dtype == torch.float32
         return x, img
