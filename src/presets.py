@@ -1,6 +1,7 @@
 import torch as th
 import numpy as np
 from functools import partial
+from inspect import getmembers, isfunction, isclass, signature
 
 def get_generic_bends(transform, transform_name, duration=30, fps=32, layer=0, start = 0, end = 30):
     bends = {'layer': layer,  'RGB':True}
