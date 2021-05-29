@@ -72,7 +72,7 @@ class Translate(th.nn.Module):
             kT.Translate(b),
             kA.CenterCrop((h, w)),
         )
-        fn = sequential_fn(self.modulation)
+        fn = sequential_fn(self.modulation*h)
         return fn(x)
 
 
