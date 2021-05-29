@@ -7,8 +7,8 @@ def get_generic_bends(transform, transform_name, duration=30, fps=32, layer=0, s
     bends = {'layer': layer,  'RGB':True}
     if len(str(signature(transform.__init__))) > 6:
 
-        intro_tl = torch.zeros(start*fps)
-        end_tl = torch.ones((duration-end)*fps)
+        intro_tl = th.zeros(start*fps)
+        end_tl = th.ones((duration-end)*fps)
         if transform_name == 'Translate':
             active_tl = np.concatenate([np.linspace(0, 1, (end-start)*fps)])
             
