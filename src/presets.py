@@ -2,10 +2,13 @@ import torch as th
 import numpy as np
 from functools import partial
 from inspect import getmembers, isfunction, isclass, signature
+import re 
 
 def get_generic_bends(transform, transform_name, duration=30, fps=32, layer=0, start = 0, end = 30):
     bends = {'layer': layer,  'RGB':True}
-    if len(str(signature(transform.__init__))) > 6:
+    pattern = re.compile('modulation')
+    sign_string = str(signature(transform.__init__))
+    if re.search(pattern, sign_string ):
 
         intro_tl = th.zeros(start*fps)
         end_tl = th.ones((duration-end)*fps)
