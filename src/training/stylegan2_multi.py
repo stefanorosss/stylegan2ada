@@ -235,7 +235,7 @@ class SynthesisBlock(torch.nn.Module):
         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
         self.num_conv = 0
         self.num_torgb = 0
-
+        self.block_idx = block_idx
         if in_channels == 0:
 # !!! custom
             self.const = torch.nn.Parameter(torch.randn([out_channels, *init_res]))
@@ -265,7 +265,12 @@ class SynthesisBlock(torch.nn.Module):
     def forward(self, x, img, ws, latmask, dconst, noise = [None,None], force_fp32=True, fused_modconv=None, transform_dict_list=[], **layer_kwargs):
     # def forward(self, x, img, ws, force_fp32=False, fused_modconv=None, **layer_kwargs):
         misc.assert_shape(ws, [None, self.num_conv + self.num_torgb, self.w_dim])
+        for transform_dict in transform_dict_list:
+                if (self.block_idx-1)*2 >= transform_dict['layer']:
+                    ws = ws[0].unsqueeze(0) 
+        
         w_iter = iter(ws.unbind(dim=1))
+        
         dtype = torch.float16 if self.use_fp16 and not force_fp32 else torch.float32
         memory_format = torch.channels_last if self.channels_last and not force_fp32 else torch.contiguous_format
         if fused_modconv is None:
@@ -290,6 +295,10 @@ class SynthesisBlock(torch.nn.Module):
         if self.in_channels == 0:
 # !!! custom latmask
             x = self.conv1(x, None, next(w_iter), noise = noise[1] , fused_modconv=fused_modconv,transform_dict_list=transform_dict_list, **layer_kwargs)
+            nwiter = next(w_iter)
+            for transform_dict in transform_dict_list:
+                if self.conv1.layer_idx == transform_dict['layer']:
+                    nwiter = nwiter[0].unsqueeze(0)
             # x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
         elif self.architecture == 'resnet':
             y = self.skip(x, gain=np.sqrt(0.5))
@@ -302,7 +311,16 @@ class SynthesisBlock(torch.nn.Module):
         else:
 # !!! custom latmask
             x = self.conv0(x, latmask, next(w_iter), noise = noise[0], fused_modconv=fused_modconv,transform_dict_list=transform_dict_list, **layer_kwargs)
-            x = self.conv1(x, None, next(w_iter), noise = noise[1], fused_modconv=fused_modconv, transform_dict_list=transform_dict_list, **layer_kwargs)
+            # custom hack
+            nwiter = next(w_iter)
+            for transform_dict in transform_dict_list:
+                if self.conv0.layer_idx == transform_dict['layer']:
+                    nwiter = nwiter[0].unsqueeze(0)
+            x = self.conv1(x, None, nwiter, noise = noise[1], fused_modconv=fused_modconv, transform_dict_list=transform_dict_list, **layer_kwargs)
+            nwiter = next(w_iter)
+            for transform_dict in transform_dict_list:
+                if (self.conv1.layer_idx == transform_dict['layer']) or (self.conv0.layer_idx == transform_dict['layer']):
+                    nwiter = nwiter[0].unsqueeze(0)
             # x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
             # x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
 
@@ -314,7 +332,8 @@ class SynthesisBlock(torch.nn.Module):
             img = fix_size(img, self.size, scale_type=self.scale_type)
             
         if self.is_last or self.architecture == 'skip':
-            y = self.torgb(x, next(w_iter), fused_modconv=fused_modconv)
+            
+            y = self.torgb(x, nwiter, fused_modconv=fused_modconv)
             y = y.to(dtype=torch.float32, memory_format=torch.contiguous_format)
             if img is not None:
                 for transform_dict in transform_dict_list:
