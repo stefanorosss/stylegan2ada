@@ -434,7 +434,7 @@ class SynthesisNetwork(torch.nn.Module):
                 x, img = block(x, img, cur_ws, latmask, dconst, noise, transform_dict_list = transform_dict_list, **block_kwargs)
             
             else:
-                x, img = block(x, img, cur_ws, latmask, dconst, **block_kwargs)
+                x, img = block(x, img, cur_ws, latmask, dconst, transform_dict_list = transform_dict_list, **block_kwargs)
             # x, img = block(x, img, cur_ws, **block_kwargs)
         return img
 
