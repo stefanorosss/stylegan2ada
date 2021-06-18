@@ -17,7 +17,7 @@ class PackImageGrid(th.nn.Module):
         super(PackImageGrid, self).__init__()
 
     def pack_image_grid(self, z, chop=3):
-#         z = z.repeat(chop ** 2, 1, 1, 1)
+        z = z.repeat(chop ** 2, 1, 1, 1)
         n, c, h, w = z.shape
 
         assert (n == chop * chop)
