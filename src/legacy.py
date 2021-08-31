@@ -12,8 +12,8 @@ import re
 import copy
 import numpy as np
 import torch
-import src.dnnlib as dnnlib
-from src.torch_utils import misc
+import dnnlib
+from torch_utils import misc
 
 #----------------------------------------------------------------------------
 
@@ -39,10 +39,16 @@ def load_network_pkl(f, force_fp16=False, custom=False, **ex_kwargs):
         data = dict(G_ema=G_ema)
         nets = ['G_ema']
     else:
-        nets = []
-        for name in ['G', 'D', 'G_ema']:
-            if name in data.keys():
-                nets.append(name)
+# !!! custom
+        if custom is True:
+            G_ema = custom_generator(data, **ex_kwargs)
+            data = dict(G_ema=G_ema)
+            nets = ['G_ema']
+        else:
+            nets = []
+            for name in ['G', 'D', 'G_ema']:
+                if name in data.keys():
+                    nets.append(name)
         # print(nets)
 
     # Add missing fields.
@@ -112,7 +118,7 @@ def _populate_module_params(module, *patterns):
                     value = value_fn(*match.groups())
                 break
         try:
-            #assert found, f'{name} not found'
+            assert found
             if value is not None:
                 tensor.copy_(torch.from_numpy(np.array(value)))
         except:
@@ -120,6 +126,27 @@ def _populate_module_params(module, *patterns):
             raise
 
 #----------------------------------------------------------------------------
+
+# !!! custom
+def custom_generator(data, **ex_kwargs):
+    from training import stylegan2_multi as networks
+    try: # saved? (with new fix)
+        fmap_base = data['G_ema'].synthesis.fmap_base
+    except: # default from original configs
+        fmap_base = 32768 if data['G_ema'].img_resolution >= 512 else 16384
+    kwargs = dnnlib.EasyDict(
+        z_dim           = data['G_ema'].z_dim,
+        c_dim           = data['G_ema'].c_dim,
+        w_dim           = data['G_ema'].w_dim,
+        img_resolution  = data['G_ema'].img_resolution,
+        img_channels    = data['G_ema'].img_channels,
+        init_res        = data['G_ema'].init_res,
+        mapping_kwargs  = dnnlib.EasyDict(num_layers = data['G_ema'].mapping.num_layers),
+        synthesis_kwargs = dnnlib.EasyDict(channel_base = fmap_base, **ex_kwargs),
+    )
+    G_out = networks.Generator(**kwargs).eval().requires_grad_(False)
+    misc.copy_params_and_buffers(data['G_ema'], G_out, require_all=False)
+    return G_out
 
 # !!! custom
 def convert_tf_generator(tf_G, custom=False, **ex_kwargs):
@@ -192,11 +219,9 @@ def convert_tf_generator(tf_G, custom=False, **ex_kwargs):
 
     # Convert params.
     if custom:
-        from src.training import stylegan2_multi as networks
-        from importlib import reload
-        reload(networks)
+        from training import stylegan2_multi as networks
     else:
-        from src.training import networks
+        from training import networks
     G = networks.Generator(**kwargs).eval().requires_grad_(False)
     # pylint: disable=unnecessary-lambda
     _populate_module_params(G,
@@ -295,7 +320,7 @@ def convert_tf_discriminator(tf_D):
     #for name, value in tf_params.items(): print(f'{name:<50s}{list(value.shape)}')
 
     # Convert params.
-    from src.training import networks
+    from training import networks
     D = networks.Discriminator(**kwargs).eval().requires_grad_(False)
     # pylint: disable=unnecessary-lambda
     _populate_module_params(D,
@@ -326,12 +351,9 @@ def convert_tf_discriminator(tf_D):
 @click.option('--force-fp16', help='Force the networks to use FP16', type=bool, default=False, metavar='BOOL', show_default=True)
 def convert_network_pickle(source, dest, force_fp16):
     """Convert legacy network pickle into the native PyTorch format.
-
     The tool is able to load the main network configurations exported using the TensorFlow version of StyleGAN2 or StyleGAN2-ADA.
     It does not support e.g. StyleGAN2-ADA comparison methods, StyleGAN2 configs A-D, or StyleGAN1 networks.
-
     Example:
-
     \b
     python legacy.py \\
         --source=https://nvlabs-fi-cdn.nvidia.com/stylegan2/networks/stylegan2-cat-config-f.pkl \\
@@ -349,5 +371,3 @@ def convert_network_pickle(source, dest, force_fp16):
 
 if __name__ == "__main__":
     convert_network_pickle() # pylint: disable=no-value-for-parameter
-
-#----------------------------------------------------------------------------
