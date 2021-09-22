@@ -39,11 +39,15 @@ def load_network_pkl(f, force_fp16=False, custom=False, **ex_kwargs):
         data = dict(G_ema=G_ema)
         nets = ['G_ema']
     else:
-        nets = []
-        for name in ['G', 'D', 'G_ema']:
-            if name in data.keys():
-                nets.append(name)
-        # print(nets)
+        if custom is True:
+            G_ema = custom_generator(data, **ex_kwargs)
+            data = dict(G_ema=G_ema)
+            nets = ['G_ema']
+        else:
+            nets = []
+            for name in ['G', 'D', 'G_ema']:
+                if name in data.keys():
+                    nets.append(name)
 
     # Add missing fields.
     if 'training_set_kwargs' not in data:
@@ -120,6 +124,26 @@ def _populate_module_params(module, *patterns):
             raise
 
 #----------------------------------------------------------------------------
+# !!! custom
+def custom_generator(data, **ex_kwargs):
+    from training import stylegan2_multi as networks
+    try: # saved? (with new fix)
+        fmap_base = data['G_ema'].synthesis.fmap_base
+    except: # default from original configs
+        fmap_base = 32768 if data['G_ema'].img_resolution >= 512 else 16384
+    kwargs = dnnlib.EasyDict(
+        z_dim           = data['G_ema'].z_dim,
+        c_dim           = data['G_ema'].c_dim,
+        w_dim           = data['G_ema'].w_dim,
+        img_resolution  = data['G_ema'].img_resolution,
+        img_channels    = data['G_ema'].img_channels,
+        init_res        = [4,4],
+        mapping_kwargs  = dnnlib.EasyDict(num_layers = data['G_ema'].mapping.num_layers),
+        synthesis_kwargs = dnnlib.EasyDict(channel_base = fmap_base, **ex_kwargs),
+    )
+    G_out = networks.Generator(**kwargs).eval().requires_grad_(False)
+    misc.copy_params_and_buffers(data['G_ema'], G_out, require_all=False)
+    return G_out
 
 # !!! custom
 def convert_tf_generator(tf_G, custom=False, **ex_kwargs):
