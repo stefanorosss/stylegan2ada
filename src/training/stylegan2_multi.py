@@ -406,7 +406,7 @@ class SynthesisNetwork(torch.nn.Module):
         
         
 
-    def forward(self, ws, latmask, dconst, noises=None, transform_dict_list=[], **block_kwargs):
+    def forward(self, ws, latmask=None, dconst= torch.zeros(1,1,1,1).to('cuda'), noises=None, transform_dict_list=[], **block_kwargs):
         block_ws = []
         with torch.autograd.profiler.record_function('split_ws'):
             misc.assert_shape(ws, [None, self.num_ws, self.w_dim])
