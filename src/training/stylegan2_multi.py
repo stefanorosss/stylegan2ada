@@ -90,7 +90,7 @@ def modulated_conv2d(
         x = fix_size(x, size, scale_type)
         x = multimask(x, size, latmask, countHW, splitfine)
     if noise is not None:
-        print(x.shape, noise.shape)
+#         print(x.shape, noise.shape)
         noise = noise.to(x.device)
         x = x.add_(noise)
     return x
